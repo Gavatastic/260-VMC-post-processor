@@ -162,7 +162,8 @@ function onOpen() {
   writeln("[GM HEADER]");
   writeln("type=mill");
   writeln("machine=260VMC");
-  writeln("last operation=EDIT")
+  writeln("machine serial no=260XXXXXX");
+  writeln("last operation=EDIT");
   writeln("units=" + ((unit == IN) ? "in" : "mm"));
   writeln("T1=32= T=2 P=3 D=6.000 C=23.000 SD=6.000 SH=16.000 FIT=YES Z=" + rLab_ZToolOffset);  
   if (rLab_ZToolOffset==100) {
