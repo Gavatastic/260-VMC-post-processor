@@ -52,7 +52,6 @@ properties = {
   rLab_suppressUnsupportedCommands:true, // suppress G28 (with G91), M8, M9, G43, G54, G94, M1
   rLab_forcezeroes:true, // force zeroes in G02 and G03 commands
   rLab_banZPlaneArcs:true, // bail out with error if Z plane arc encountered
-  rLab_ZToolOffset: 100, // z tool offset 
   rLab_negZRapidPlungeRate: 5, // plunge feed rate when rapiding z<0
   rLab_ZRetractForChange: 100, // retract height for tool change
   writeMachine: true, // write machine
@@ -63,6 +62,19 @@ properties = {
   sequenceNumberIncrement: 1, // increment for sequence numbers
   optionalStop: true, // optional stop
   separateWordsWithSpace: true // specifies that the words should be separated with a white space
+};
+
+var mapToolType = {
+  TOOL_MILLING_FACE:1,
+  TOOL_MILLING_SLOT:2,
+  TOOL_DRILL_SPOT:4,
+  TOOL_MILLING_END_BALL:5,
+  TOOL_MILLING_SLOT:6,
+  TOOL_DRILL:7,
+  TOOL_TAP_RIGHT_HAND:8,
+  TOOL_MILLING_END_FLAT:9,
+  COMMAND_COOLANT_ON:8,
+  COMMAND_COOLANT_OFF:9
 };
 
 var numberOfToolSlots = 9999;
@@ -162,11 +174,47 @@ function onOpen() {
   writeln("machine serial no=260XXXXXX");
   writeln("last operation=EDIT");
   writeln("units=" + ((unit == IN) ? "in" : "mm"));
-  writeln("T1=32= T=2 P=3 D=6.000 C=23.000 SD=6.000 SH=16.000 FIT=YES Z=" + properties.rLab_ZToolOffset);  
+  
+  
+  var bfTools=getToolTable();
+  if (bfTools.getNumberOfTools() > 0) {
+    writeComment(bfTools.getNumberOfTools() + " tool(s) used");
+    for (var i = 0; i < bfTools.getNumberOfTools(); ++i) {
+      var bfTool=bfTools.getTool(i);
+      write("T");
+      write(bfTool.getNumber());
+      write("=32= T=");
+      var bfToolType = bfTool.getType();    // tool type
+      var ToolType = mapToolType[bfToolType];
+      if (ToolType != undefined) {
+        write(ToolType + " ");
+      } else {
+        write("1 ");
+      }
+      write("P=" + bfTool.getNumber() + " "); // position - just using tool number
+      write("D=" + bfTool.getDiameter() + " "); // diameter = tip diameter
+      write("C=" + bfTool.getFluteLength() + " "); // cut height = flute length
+      write("SD=" + bfTool.getDiameter() + " "); // shaft diameter
+      write("SH=" + bfTool.getBodyLength() + " "); // shaft length
+      write("FIT=YES ");
+      if (bfTool.getComment() == "") {
+        writeln("Z=90");
+        writeComment("Warning: Default Z tool offset of 90mm inserted for tool " + bfTool.getNumber() );
+        warning(localize("Default Z tool offset of 90mm inserted for tool " + bfTool.getNumber() + "due to missing value in Tool Library Post-Processor Comment field"));
+      } else {
+        writeln("Z=" + bfTool.getComment());
+      }
+    }
+  }
+  
+  //writeln("T1=32= T=2 P=3 D=6.000 C=23.000 SD=6.000 SH=16.000 FIT=YES Z=" + properties.rLab_ZToolOffset);  
+  
   if (properties.rLab_ZToolOffset==100) {
     warning(localize("Default Z tool offset placed in file"));
     setExitCode(1002);
   };
+  
+  
   writeln("material=PLASTICS,4.0000");
   
   if(isWorkpieceDefined()) {
