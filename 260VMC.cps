@@ -41,7 +41,7 @@ minimumCircularRadius = spatial(0.01, MM);
 maximumCircularRadius = spatial(1000, MM);
 minimumCircularSweep = toRad(0.01);
 maximumCircularSweep = toRad(180);
-allowHelicalMoves = true;
+allowHelicalMoves = false;
 allowedCircularPlanes = undefined; // allow any circular motion
 
 
@@ -49,15 +49,12 @@ allowedCircularPlanes = undefined; // allow any circular motion
 // G91 supression not req'd -  G91s supressed along with G28s
 
 properties = {
-  rLab_suppressG28: true, // suppresses G28 commands
-  rLab_suppressCoolantCommands:true, // suppresses M8 and M9 coolant commands
-  rLab_suppressToolOffset:true, // suppress G43 (tool offset length)
-  rLab_suppressWorkOffset:true, // suppress G54 (work offset)
-  //rLab_suppressIncDistMode:true, // suppress G91 (incremental distance mode) 
-  rLab_suppressFeedPerMinModal:true, // suppress G94 (feed per minute modal)
+  rLab_suppressUnsupportedCommands:true, // suppress G28 (with G91), M8, M9, G43, G54, G94, M1
   rLab_forcezeroes:true, // force zeroes in G02 and G03 commands
   rLab_banZPlaneArcs:true, // bail out with error if Z plane arc encountered
-  rLab_ZToolOffset: 100, // z tool offset    
+  rLab_ZToolOffset: 100, // z tool offset 
+  rLab_negZRapidPlungeRate: 5, // plunge feed rate when rapiding z<0
+  rLab_ZRetractForChange: 100, // retract height for tool change
   writeMachine: true, // write machine
   writeTools: true, // writes the tools
   preloadTool: false, // preloads next tool on tool change if any
@@ -165,8 +162,8 @@ function onOpen() {
   writeln("machine serial no=260XXXXXX");
   writeln("last operation=EDIT");
   writeln("units=" + ((unit == IN) ? "in" : "mm"));
-  writeln("T1=32= T=2 P=3 D=6.000 C=23.000 SD=6.000 SH=16.000 FIT=YES Z=" + rLab_ZToolOffset);  
-  if (rLab_ZToolOffset==100) {
+  writeln("T1=32= T=2 P=3 D=6.000 C=23.000 SD=6.000 SH=16.000 FIT=YES Z=" + properties.rLab_ZToolOffset);  
+  if (properties.rLab_ZToolOffset==100) {
     warning(localize("Default Z tool offset placed in file"));
     setExitCode(1002);
   };
@@ -260,7 +257,7 @@ function onOpen() {
   }
 
   // absolute coordinates and feed per min
-  if (!rLab_suppressFeedPerMinModal) {
+  if (!properties.rLab_suppressUnsupportedCommands) {
     writeBlock(gAbsIncModal.format(90), gFeedModeModal.format(94));
   } else {
     writeBlock(gAbsIncModal.format(90));
@@ -410,7 +407,7 @@ function onSection() {
 
     // retract to safe plane
     retracted = true;
-    if (!rLab_suppressG28) {
+    if (!properties.rLab_suppressUnsupportedCommands) {
       writeBlock(gFormat.format(28), gAbsIncModal.format(91), "Z" + xyzFormat.format(0)); // retract
     } 
     
@@ -439,6 +436,9 @@ function onSection() {
       warning(localize("Tool number exceeds maximum value."));
     }
 
+    // additional retraction to allow for tool change
+    writeBlock(gFormat.format(0), zOutput.format(properties.rLab_ZRetractForChange));
+        
     writeBlock(mFormat.format(6), "T" + toolFormat.format(tool.number));
     if (tool.comment) {
       writeComment(tool.comment);
@@ -512,7 +512,7 @@ function onSection() {
       }
     } else {
       if (workOffset != currentWorkOffset) {
-        if(!rLab_suppressWorkOffset) {
+        if(!properties.rLab_suppressUnsupportedCommands) {
           writeBlock(gFormat.format(53 + workOffset)); // G54->G59
         }
         currentWorkOffset = workOffset;
@@ -541,10 +541,10 @@ function onSection() {
     }
     setRotation(remaining);
   }
-
+  
   // set coolant after we have positioned at Z
   {
-    if(!rLab_suppressCoolantCommands) {
+    if(!properties.rLab_suppressUnsupportedCommands) {
       var c = mapCoolantTable.lookup(tool.coolant);
       if (c) {
         writeBlock(mFormat.format(c));
@@ -555,7 +555,6 @@ function onSection() {
   }
 
   forceAny();
-
   
   var initialPosition = getFramePosition(currentSection.getInitialPosition());
   if (!retracted) {
@@ -573,26 +572,25 @@ function onSection() {
 
     gMotionModal.reset();
     writeBlock(gPlaneModal.format(17));
-
-    if (!machineConfiguration.isHeadConfiguration()) {
+        
+    if (!machineConfiguration.isHeadConfiguration()) {   
       writeBlock(
         gAbsIncModal.format(90),
-        gMotionModal.format(0), xOutput.format(initialPosition.x), yOutput.format(initialPosition.y)
+        gMotionModal.format(0), xOutput.format(initialPosition.x), yOutput.format(initialPosition.y), zOutput.format(initialPosition.z)
       );
-
-      if(!rLab_suppressToolOffset) {
+      if(!properties.rLab_suppressUnsupportedCommands) {
         writeBlock(gMotionModal.format(0), gFormat.format(43), zOutput.format(initialPosition.z), hFormat.format(lengthOffset));
       }
     } else {
 
-      if(!rLab_suppressToolOffset) {
+      if(!properties.rLab_suppressUnsupportedCommands) {
         writeBlock(
           gAbsIncModal.format(90),
           gMotionModal.format(0),
           gFormat.format(43), xOutput.format(initialPosition.x),
           yOutput.format(initialPosition.y),
           zOutput.format(initialPosition.z), hFormat.format(lengthOffset)
-        );
+        )
       }
     }
 
@@ -604,7 +602,6 @@ function onSection() {
       yOutput.format(initialPosition.y)
     );
   }
-  
 }
 
 function onDwell(seconds) {
@@ -807,7 +804,12 @@ function onRapid(_x, _y, _z) {
       error(localize("Radius compensation mode cannot be changed at rapid traversal."));
       return;
     }
-    writeBlock(gMotionModal.format(0), x, y, z);
+    if (getCurrentPosition().getZ()>0 && _z<=0) {
+      writeBlock(gMotionModal.format(0), x, y, zOutput.format(0.1));
+      writeBlock(gFormat.format(1), z, feedOutput.format(properties.rLab_negZRapidPlungeRate));
+    } else {
+      writeBlock(gMotionModal.format(0), x, y, z);
+    }
     feedOutput.reset();
   }
 }
@@ -923,14 +925,14 @@ function onCircular(clockwise, cx, cy, cz, x, y, z, feed) {
       writeBlock(gPlaneModal.format(17), gMotionModal.format(clockwise ? 2 : 3), xOutput.format(x), iOutput.format(cx - start.x, 0), jOutput.format(cy - start.y, 0), feedOutput.format(feed));
       break;
     case PLANE_ZX:
-      if(!rLab_banZPlaneArcs){
+      if(!properties.rLab_banZPlaneArcs){
         writeBlock(gPlaneModal.format(18), gMotionModal.format(clockwise ? 2 : 3), zOutput.format(z), iOutput.format(cx - start.x, 0), kOutput.format(cz - start.z, 0), feedOutput.format(feed));
       } else {
         error("XZ arc attempted");
       }
       break;
     case PLANE_YZ:
-      if(!rLab_banZPlaneArcs){ 
+      if(!properties.rLab_banZPlaneArcs){ 
         writeBlock(gPlaneModal.format(19), gMotionModal.format(clockwise ? 2 : 3), yOutput.format(y), jOutput.format(cy - start.y, 0), kOutput.format(cz - start.z, 0), feedOutput.format(feed));
       } else {
         error("YZ arc attempted"); 
@@ -945,14 +947,14 @@ function onCircular(clockwise, cx, cy, cz, x, y, z, feed) {
       writeBlock(gPlaneModal.format(17), gMotionModal.format(clockwise ? 2 : 3), xOutput.format(x), yOutput.format(y), zOutput.format(z), iOutput.format(cx - start.x, 0), jOutput.format(cy - start.y, 0), feedOutput.format(feed));
       break;
     case PLANE_ZX:
-      if(!rLab_banZPlaneArcs) {
+      if(!properties.rLab_banZPlaneArcs) {
         writeBlock(gPlaneModal.format(18), gMotionModal.format(clockwise ? 2 : 3), xOutput.format(x), yOutput.format(y), zOutput.format(z), iOutput.format(cx - start.x, 0), kOutput.format(cz - start.z, 0), feedOutput.format(feed));
       } else {
         error("XZ arc attempted");      
       }
       break;
     case PLANE_YZ:
-      if (!rLab_banZPlaneArcs) {
+      if (!properties.rLab_banZPlaneArcs) {
         writeBlock(gPlaneModal.format(19), gMotionModal.format(clockwise ? 2 : 3), xOutput.format(x), yOutput.format(y), zOutput.format(z), jOutput.format(cy - start.y, 0), kOutput.format(cz - start.z, 0), feedOutput.format(feed));
       } else {
         error("YZ arc attempted");         
@@ -997,10 +999,10 @@ function onCommand(command) {
   var mcode = mapCommand[stringId];
   
   if (mcode != undefined) {
-    if (!rLab_suppressCoolantCommands) {
+    if (!properties.rLab_suppressUnsupportedCommands) {
       writeBlock(mFormat.format(mcode));
     } else {
-      if(mcode<=7) {
+      if(mcode<=7 && mcode!=1) {
         writeBlock(mFormat.format(mcode));
       }
     }
@@ -1017,7 +1019,7 @@ function onSectionEnd() {
 function onClose() {
   onCommand(COMMAND_COOLANT_OFF);
 
-  if (!rLab_suppressG28) {
+  if (!properties.rLab_suppressUnsupportedCommands) {
     writeBlock(gFormat.format(28), gAbsIncModal.format(91), "Z" + xyzFormat.format(0)); // retract
   } 
   zOutput.reset();
@@ -1025,7 +1027,7 @@ function onClose() {
   setWorkPlane(new Vector(0, 0, 0)); // reset working plane
 
   if (!machineConfiguration.hasHomePositionX() && !machineConfiguration.hasHomePositionY()) {
-    if (!rLab_suppressG28) {
+    if (!properties.rLab_suppressUnsupportedCommands) {
       writeBlock(gFormat.format(28), gAbsIncModal.format(91), "X" + xyzFormat.format(0), "Y" + xyzFormat.format(0)); // return to home
     }
   } else {
