@@ -51,9 +51,8 @@ allowedCircularPlanes = undefined; // allow any circular motion
 properties = {
   rLab_suppressUnsupportedCommands:true, // suppress G28 (with G91), M8, M9, G43, G54, G94, M1
   rLab_forcezeroes:true, // force zeroes in G02 and G03 commands
-  rLab_banZPlaneArcs:true, // bail out with error if Z plane arc encountered
   rLab_negZRapidPlungeRate: 5, // plunge feed rate when rapiding z<0
-  rLab_ZRetractForChange: 100, // retract height for tool change
+  rLab_ZRetractForChange: 75, // retract height for tool change
   writeMachine: true, // write machine
   writeTools: true, // writes the tools
   preloadTool: false, // preloads next tool on tool change if any
@@ -197,18 +196,12 @@ function onOpen() {
       write("SD=" + bfTool.getDiameter() + " "); // shaft diameter
       write("SH=" + bfTool.getBodyLength() + " "); // shaft length
       write("FIT=YES ");
-      if (bfTool.getComment() == "") {
-        writeln("Z=90");
-        writeComment("Warning: Default Z tool offset of 90mm inserted for tool " + bfTool.getNumber() );
-        warning(localize("Default Z tool offset of 90mm inserted for tool " + bfTool.getNumber() + "due to missing value in Tool Library Post-Processor Comment field"));
-      } else {
-        writeln("Z=" + bfTool.getComment());
-      }
+      writeln("Z=90");
+      
     }
   }
-  
-  //writeln("T1=32= T=2 P=3 D=6.000 C=23.000 SD=6.000 SH=16.000 FIT=YES Z=" + properties.rLab_ZToolOffset);  
-  
+
+
   if (properties.rLab_ZToolOffset==100) {
     warning(localize("Default Z tool offset placed in file"));
     setExitCode(1002);
@@ -484,9 +477,11 @@ function onSection() {
       warning(localize("Tool number exceeds maximum value."));
     }
 
-    // additional retraction to allow for tool change
-    writeBlock(gFormat.format(0), zOutput.format(properties.rLab_ZRetractForChange));
-        
+    // additional retraction to allow for tool change, providing it is not the first section
+    if (!isFirstSection()) {
+      writeBlock(gFormat.format(0), zOutput.format(properties.rLab_ZRetractForChange));
+    }
+    
     writeBlock(mFormat.format(6), "T" + toolFormat.format(tool.number));
     if (tool.comment) {
       writeComment(tool.comment);
@@ -973,18 +968,10 @@ function onCircular(clockwise, cx, cy, cz, x, y, z, feed) {
       writeBlock(gPlaneModal.format(17), gMotionModal.format(clockwise ? 2 : 3), xOutput.format(x), iOutput.format(cx - start.x, 0), jOutput.format(cy - start.y, 0), feedOutput.format(feed));
       break;
     case PLANE_ZX:
-      if(!properties.rLab_banZPlaneArcs){
-        writeBlock(gPlaneModal.format(18), gMotionModal.format(clockwise ? 2 : 3), zOutput.format(z), iOutput.format(cx - start.x, 0), kOutput.format(cz - start.z, 0), feedOutput.format(feed));
-      } else {
-        error("XZ arc attempted");
-      }
+      writeBlock(gPlaneModal.format(18), gMotionModal.format(clockwise ? 2 : 3), zOutput.format(z), iOutput.format(cx - start.x, 0), kOutput.format(cz - start.z, 0), feedOutput.format(feed));
       break;
-    case PLANE_YZ:
-      if(!properties.rLab_banZPlaneArcs){ 
-        writeBlock(gPlaneModal.format(19), gMotionModal.format(clockwise ? 2 : 3), yOutput.format(y), jOutput.format(cy - start.y, 0), kOutput.format(cz - start.z, 0), feedOutput.format(feed));
-      } else {
-        error("YZ arc attempted"); 
-      }
+    case PLANE_YZ:   
+      writeBlock(gPlaneModal.format(19), gMotionModal.format(clockwise ? 2 : 3), yOutput.format(y), jOutput.format(cy - start.y, 0), kOutput.format(cz - start.z, 0), feedOutput.format(feed));
       break;
     default:
       linearize(tolerance);
@@ -995,18 +982,10 @@ function onCircular(clockwise, cx, cy, cz, x, y, z, feed) {
       writeBlock(gPlaneModal.format(17), gMotionModal.format(clockwise ? 2 : 3), xOutput.format(x), yOutput.format(y), zOutput.format(z), iOutput.format(cx - start.x, 0), jOutput.format(cy - start.y, 0), feedOutput.format(feed));
       break;
     case PLANE_ZX:
-      if(!properties.rLab_banZPlaneArcs) {
-        writeBlock(gPlaneModal.format(18), gMotionModal.format(clockwise ? 2 : 3), xOutput.format(x), yOutput.format(y), zOutput.format(z), iOutput.format(cx - start.x, 0), kOutput.format(cz - start.z, 0), feedOutput.format(feed));
-      } else {
-        error("XZ arc attempted");      
-      }
+      writeBlock(gPlaneModal.format(18), gMotionModal.format(clockwise ? 2 : 3), xOutput.format(x), yOutput.format(y), zOutput.format(z), iOutput.format(cx - start.x, 0), kOutput.format(cz - start.z, 0), feedOutput.format(feed));
       break;
     case PLANE_YZ:
-      if (!properties.rLab_banZPlaneArcs) {
-        writeBlock(gPlaneModal.format(19), gMotionModal.format(clockwise ? 2 : 3), xOutput.format(x), yOutput.format(y), zOutput.format(z), jOutput.format(cy - start.y, 0), kOutput.format(cz - start.z, 0), feedOutput.format(feed));
-      } else {
-        error("YZ arc attempted");         
-      }
+      writeBlock(gPlaneModal.format(19), gMotionModal.format(clockwise ? 2 : 3), xOutput.format(x), yOutput.format(y), zOutput.format(z), jOutput.format(cy - start.y, 0), kOutput.format(cz - start.z, 0), feedOutput.format(feed));
       break;
     default:
       linearize(tolerance);
